@@ -74,7 +74,8 @@ typedef struct{
 }report_t;
 
 static report_t reportBuffer;
-static int      sinus = 7 << 6, cosinus = 0;
+#define SINUS_INIT (15 << 3)
+static int      sinus = SINUS_INIT, cosinus = 0;
 static uchar    idleRate;   /* repeat rate for keyboards, never used for mice */
 
 
@@ -83,15 +84,48 @@ static uchar    idleRate;   /* repeat rate for keyboards, never used for mice */
  * descriptor.
  * The algorithm is the simulation of a second order differential equation.
  */
-static void advanceCircleByFixedAngle(void)
+static void advance_mouse(void)
 {
-char    d;
-
+    static heart_state = 0;
+    static edge_pixels = 0;
+    /* formerly advanceCircleByFixedAngle() */
+    char    d;
 #define DIVIDE_BY_64(val)  (val + (val > 0 ? 32 : -32)) >> 6    /* rounding divide */
-    reportBuffer.dx = d = DIVIDE_BY_64(cosinus);
-    sinus += d;
-    reportBuffer.dy = d = DIVIDE_BY_64(sinus);
-    cosinus -= d;
+    switch (heart_state)
+    {
+        case 0:
+        case 1:
+            reportBuffer.dx = d = DIVIDE_BY_64(cosinus);
+            sinus += d;
+            reportBuffer.dy = d = - DIVIDE_BY_64(sinus);
+            cosinus += d;
+            /* /  advanceCircleByFixedAngle() */
+            if (cosinus > 0)
+            {
+                sinus = SINUS_INIT;
+                cosinus = 0;
+                heart_state++;
+            }
+            break;
+        case 2:
+            reportBuffer.dx = 3;
+            reportBuffer.dy = 6;
+            edge_pixels++;
+            if (edge_pixels > 97)
+            {
+                heart_state++;
+            }
+            break;
+        case 3:
+            reportBuffer.dx = 3;
+            reportBuffer.dy = -6;
+            edge_pixels--;
+            if (edge_pixels == 0)
+            {
+                heart_state = 0;
+            }
+            break;
+    }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -122,10 +156,61 @@ usbRequest_t    *rq = (void *)data;
 }
 
 /* ------------------------------------------------------------------------- */
+/* ------------------------ Oscillator Calibration ------------------------- */
+/* ------------------------------------------------------------------------- */
+
+/* Calibrate the RC oscillator. Our timing reference is the Start Of Frame
+ * signal (a single SE0 bit) repeating every millisecond immediately after
+ * a USB RESET. We first do a binary search for the OSCCAL value and then
+ * optimize this value with a neighboorhod search.
+ */
+void    calibrateOscillator(void)
+{
+uchar       step = 128;
+uchar       trialValue = 0, optimumValue;
+int         x, optimumDev, targetValue = (unsigned)(1499 * (double)F_CPU / 10.5e6 + 0.5);
+
+    /* do a binary search: */
+    do{
+        OSCCAL = trialValue + step;
+        x = usbMeasureFrameLength();    /* proportional to current real frequency */
+        if(x < targetValue)             /* frequency still too low */
+            trialValue += step;
+        step >>= 1;
+    }while(step > 0);
+    /* We have a precision of +/- 1 for optimum OSCCAL here */
+    /* now do a neighborhood search for optimum value */
+    optimumValue = trialValue;
+    optimumDev = x; /* this is certainly far away from optimum */
+    for(OSCCAL = trialValue - 1; OSCCAL <= trialValue + 1; OSCCAL++){
+        x = usbMeasureFrameLength() - targetValue;
+        if(x < 0)
+            x = -x;
+        if(x < optimumDev){
+            optimumDev = x;
+            optimumValue = OSCCAL;
+        }
+    }
+    OSCCAL = optimumValue;
+}
+/*
+Note: This calibration algorithm may try OSCCAL values of up to 192 even if
+the optimum value is far below 192. It may therefore exceed the allowed clock
+frequency of the CPU in low voltage designs!
+You may replace this search algorithm with any other algorithm you like if
+you have additional constraints such as a maximum CPU clock.
+For version 5.x RC oscillators (those with a split range of 2x128 steps, e.g.
+ATTiny25, ATTiny45, ATTiny85), it may be useful to search for the optimum in
+both regions.
+*/
+/* ------------------------------------------------------------------------- */
 
 int __attribute__((noreturn)) main(void)
 {
 uchar   i;
+
+    int   led_timer   = 0;
+    uchar led_counter = 0;
 
     wdt_enable(WDTO_1S);
     /* Even if you don't use the watchdog, turn it off here. On newer devices,
@@ -146,6 +231,16 @@ uchar   i;
     }
     usbDeviceConnect();
     sei();
+
+    /* usbflattiny code */
+    DDRB |= (1<<PORTB5) | (1<<PORTB4) | (1<<PORTB3) | (1<<PORTB1);
+
+    PORTB |= (1<<PORTB5);
+    PORTB |= (1<<PORTB3);
+    PORTB &= ~(1<<PORTB4);
+    PORTB &= ~(1<<PORTB1);
+    /* /usbflattiny code */
+
     DBG1(0x01, 0, 0);       /* debug output: main loop starts */
     for(;;){                /* main event loop */
         DBG1(0x02, 0, 0);   /* debug output: main loop iterates */
@@ -153,10 +248,23 @@ uchar   i;
         usbPoll();
         if(usbInterruptIsReady()){
             /* called after every poll of the interrupt endpoint */
-            advanceCircleByFixedAngle();
+            advance_mouse();
             DBG1(0x03, 0, 0);   /* debug output: interrupt report prepared */
             usbSetInterrupt((void *)&reportBuffer, sizeof(reportBuffer));
         }
+        /* usbflattiny code */
+        led_timer++;
+        if (led_timer == 23*1000)
+        {
+            led_counter++;
+            if (led_counter == 0x10) led_counter = 0;
+            if (led_counter & 0x1) PORTB |= (1<<PORTB4); else PORTB &= ~(1<<PORTB4);
+            if (led_counter & 0x2) PORTB |= (1<<PORTB3); else PORTB &= ~(1<<PORTB3);
+            if (led_counter & 0x4) PORTB |= (1<<PORTB5); else PORTB &= ~(1<<PORTB5);
+            if (led_counter & 0x8) PORTB |= (1<<PORTB1); else PORTB &= ~(1<<PORTB1);
+            led_timer = 0;
+        }
+        /* /usbflattiny code */
     }
 }
 
