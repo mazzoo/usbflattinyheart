@@ -73,66 +73,81 @@ typedef struct{
     char    dWheel;
 }report_t;
 
+typedef struct{
+    char x;
+    char y;
+} heart_table_t;
+
+heart_table_t heart_table[] = {
+    { 0,  1},
+    { 0,  3},
+    { 1,  4},
+    { 2,  6},
+    { 3,  7},
+    { 4,  7},
+    { 5,  7},
+    { 7,  7},
+    { 8,  7},
+    { 9,  6},
+    {10,  4},
+    {11,  3},
+    {11,  1},
+    {12, -1},
+    {11, -3},
+    {11, -5},
+    {10, -6},
+    { 9, -8},
+    { 8, -9},
+    { 6, -10},
+    { 4, -11},
+    { 2, -12},
+    { 0, -12},
+    {-2, -12},
+    {-4, -12},
+    {-6, -12},
+    {-8, -11},
+    {-9, -11},
+    {-10, -11},
+    {-11, -10},
+    {-11, -10},
+    {-12, -10},
+    {-11, -10},
+    {-11, -9},
+    {-10, -9},
+    {-9, -9},
+    {-8, -8},
+    {-7, -8},
+    {-5, -7},
+    {-4, -6},
+    {-3, -6},
+    {-2, -4},
+    {-1, -3},
+    {-0, -2},
+};
+
 static report_t reportBuffer;
-#define SINUS_INIT (15 << 3)
-static int      sinus = SINUS_INIT, cosinus = 0;
 static uchar    idleRate;   /* repeat rate for keyboards, never used for mice */
 
 
-/* The following function advances sin/cos by a fixed angle
- * and stores the difference to the previous coordinates in the report
- * descriptor.
- * The algorithm is the simulation of a second order differential equation.
- */
 static void advance_mouse(void)
 {
-    static heart_state = 0;
-    static edge_pixels = 0;
-    /* formerly advanceCircleByFixedAngle() */
-    char    d;
-#define DIVIDE_BY_64(val)  (val + (val > 0 ? 32 : -32)) >> 6    /* rounding divide */
-    switch (heart_state)
-    {
-        case 0:
-        case 1:
-            reportBuffer.dx = d = DIVIDE_BY_64(cosinus);
-            sinus += d;
-            reportBuffer.dy = d = - DIVIDE_BY_64(sinus);
-            cosinus += d;
-            /* /  advanceCircleByFixedAngle() */
-            if (cosinus > 0)
-            {
-                sinus = SINUS_INIT;
-                cosinus = 0;
-                heart_state++;
-            }
-            break;
-        case 2:
-            reportBuffer.dx = 3;
-            reportBuffer.dy = 6;
-            edge_pixels++;
-            if (edge_pixels > 97)
-            {
-                heart_state++;
-            }
-            break;
-        case 3:
-            reportBuffer.dx = 3;
-            reportBuffer.dy = -6;
-            edge_pixels--;
-            if (edge_pixels == 0)
-            {
-                heart_state = 0;
-            }
-            break;
+    static uchar phase = 0;
+    if (phase > 85) phase = 0;
+    if (phase > 43){
+        reportBuffer.dx =  heart_table[86-phase].x;
+        reportBuffer.dy =  heart_table[86-phase].y;
+    }else{
+        reportBuffer.dx =  heart_table[phase].x;
+        reportBuffer.dy = -heart_table[phase].y;
     }
+    phase++;
 }
 
 /* ------------------------------------------------------------------------- */
 
 usbMsgLen_t usbFunctionSetup(uchar data[8])
 {
-usbRequest_t    *rq = (void *)data;
+    usbRequest_t    *rq = (void *)data;
 
     /* The following requests are never used. But since they are required by
      * the specification, we implement them in this example.
@@ -166,9 +181,9 @@ usbRequest_t    *rq = (void *)data;
  */
 void    calibrateOscillator(void)
 {
-uchar       step = 128;
-uchar       trialValue = 0, optimumValue;
-int         x, optimumDev, targetValue = (unsigned)(1499 * (double)F_CPU / 10.5e6 + 0.5);
+    uchar       step = 64;
+    uchar       trialValue = 0, optimumValue;
+    int         x, optimumDev, targetValue = (unsigned)(1499 * (double)F_CPU / 10.5e6 + 0.5);
 
     /* do a binary search: */
     do{
@@ -202,12 +217,12 @@ you have additional constraints such as a maximum CPU clock.
 For version 5.x RC oscillators (those with a split range of 2x128 steps, e.g.
 ATTiny25, ATTiny45, ATTiny85), it may be useful to search for the optimum in
 both regions.
-*/
+ */
 /* ------------------------------------------------------------------------- */
 
 int __attribute__((noreturn)) main(void)
 {
-uchar   i;
+    uchar   i;
 
     int   led_timer   = 0;
     uchar led_counter = 0;
@@ -223,6 +238,7 @@ uchar   i;
     odDebugInit();
     DBG1(0x00, 0, 0);       /* debug output: main starts */
     usbInit();
+#if 0
     usbDeviceDisconnect();  /* enforce re-enumeration, do this while interrupts are disabled! */
     i = 0;
     while(--i){             /* fake USB disconnect for > 250 ms */
@@ -230,6 +246,7 @@ uchar   i;
         _delay_ms(1);
     }
     usbDeviceConnect();
+#endif
     sei();
 
     /* usbflattiny code */
