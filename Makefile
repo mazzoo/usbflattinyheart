@@ -1,16 +1,16 @@
 # Name: Makefile
-# Project: hid-data example
+# Project: hid-mouse example
 # Author: Christian Starkjohann
 # Creation Date: 2008-04-07
 # Tabsize: 4
 # Copyright: (c) 2008 by OBJECTIVE DEVELOPMENT Software GmbH
 # License: GNU GPL v2 (see License.txt), GNU GPL v3 or proprietary (CommercialLicense.txt)
 
-DEVICE  = atmega168
-F_CPU   = 16000000	# in Hz
-FUSE_L  = # see below for fuse values for particular devices
-FUSE_H  = 
-AVRDUDE = avrdude -c usbasp -p $(DEVICE) # edit this line for your programmer
+DEVICE  = attiny45
+F_CPU   = 16500000 # in Hz
+FUSE_L  = 0xe1
+FUSE_H  = 0xdd
+AVRDUDE = avrdude -c avrisp2 -p $(DEVICE) -P usb
 
 CFLAGS  = -Iusbdrv -I. -DDEBUG_LEVEL=0
 OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o usbdrv/oddebug.o main.o
@@ -141,10 +141,6 @@ clean:
 	$(COMPILE) -S $< -o $@
 
 # file targets:
-
-# Since we don't want to ship the driver multipe times, we copy it into this project:
-usbdrv:
-	cp -r ../../../usbdrv .
 
 main.elf: usbdrv $(OBJECTS)	# usbdrv dependency only needed because we copy it
 	$(COMPILE) -o main.elf $(OBJECTS)

@@ -222,8 +222,6 @@ both regions.
 
 int __attribute__((noreturn)) main(void)
 {
-    uchar   i;
-
     int   led_timer   = 0;
     uchar led_counter = 0;
 
